@@ -1,778 +1,361 @@
-import { Image, StyleSheet, ScrollView, TouchableOpacity, Platform, View, Text, ImageBackground } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ScrollView, TouchableOpacity, View, ImageBackground, Linking, Modal, Pressable } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { StatusBar } from 'react-native';
-import { Ionicons, FontAwesome5, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useState, useEffect, useCallback } from 'react';
-import { Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-import { Colors } from '@/constants/Colors';
-import { initializeOfflineStorage, getEmergencyGuide, checkGuidesStored } from '@/utils/offlineStorage';
+import { initializeOfflineStorage, checkGuidesStored } from '@/utils/offlineStorage';
 import NetInfo from '@/utils/networkUtils';
+import { CustomText } from '@/components/ui/CustomText';
+import { CustomView } from '@/components/ui/CustomView';
+import { IconRenderer } from '@/components/ui/IconRenderer';
 
-// Define the emergency guide types
-type EmergencyGuideType = 'EARTHQUAKE' | 'FIRE' | 'THEFT' | 'LOST_PERSON';
-
-// Define icon types for type safety
-type IconType = 'fa5' | 'material' | 'ionicons' | 'material-community';
-
-// Define the structure for emergency service items
-type EmergencyServiceItem = {
-  name: string;
-  phone?: string;
-  scenario?: string;
-  icon: string;
-  color: string;
-  iconType: IconType;
-};
-
-// Define the structure for emergency categories
-type EmergencyCategory = {
-  title: string;
-  icon: string;
-  iconType: IconType;
-  color: string;
-  items: EmergencyServiceItem[];
-};
-
-// Define STORAGE_KEYS locally to match what getEmergencyGuide expects
-const STORAGE_KEYS = {
-  EARTHQUAKE: 'EARTHQUAKE',
-  FIRE: 'FIRE',
-  THEFT: 'THEFT',
-  LOST_PERSON: 'LOST_PERSON',
-};
-
-const EMERGENCY_NUMBERS = {
-  POLICE: '110',
-  FIREFIGHTERS: '122',
-  FIREFIGHTERS_MUNICIPAL: '123',
-  AMBULANCE: '128',
-  CHILD_PROTECTION: '1546',
-};
-
-// Emergency categories for the home screen
-const EMERGENCY_CATEGORIES: EmergencyCategory[] = [
-  {
-    title: 'Emergencias',
-    icon: 'alert-circle',
-    iconType: 'material-community',
-    color: '#F8333C',
-    items: [
-      { 
-        name: 'Policía', 
-        phone: '110', 
-        icon: 'police-badge', 
-        color: '#3A86FF', 
-        iconType: 'material-community'
-      },
-      { 
-        name: 'Bomberos', 
-        phone: '122', 
-        icon: 'fire-extinguisher', 
-        color: '#F8333C', 
-        iconType: 'fa5'
-      },
-      { 
-        name: 'Ambulancia', 
-        phone: '128', 
-        icon: 'ambulance', 
-        color: '#B5179E', 
-        iconType: 'fa5'
-      },
-      { 
-        name: 'Protección Infantil', 
-        phone: '1546', 
-        icon: 'child', 
-        color: '#4361EE', 
-        iconType: 'fa5'
-      },
-    ]
+// ———————————————————————
+// Guide data (inline so it always works, no async dependency)
+// ———————————————————————
+const GUIDES: Record<string, { title: string; emoji: string; color: string; steps: string[] }> = {
+  fire: {
+    title: 'Incendio',
+    emoji: '🔥',
+    color: '#F77F00',
+    steps: [
+      'Mantén la calma y alerta a todos en el lugar.',
+      'Si el fuego es pequeño, intenta apagarlo con un extintor.',
+      'Si el fuego es grande, sal inmediatamente del lugar.',
+      'Gatea si hay humo — el aire es más limpio cerca del suelo.',
+      'Toca las puertas antes de abrirlas. Si están calientes, busca otra salida.',
+      'Llama a los Bomberos al 122 o 123.',
+      'No uses el ascensor, siempre toma las escaleras.',
+    ],
   },
-  {
-    title: 'Guías de Emergencia',
-    icon: 'book-open-page-variant',
-    iconType: 'material-community',
-    color: '#4CC9F0',
-    items: [
-      { 
-        name: 'Incendio', 
-        scenario: 'fire', 
-        icon: 'fire', 
-        color: '#F77F00', 
-        iconType: 'material-community'
-      },
-      { 
-        name: 'Terremoto', 
-        scenario: 'earthquake', 
-        icon: 'home-alert', 
-        color: '#7209B7', 
-        iconType: 'material-community'
-      },
-      { 
-        name: 'Primeros Auxilios', 
-        scenario: 'firstAid', 
-        icon: 'medical-bag', 
-        color: '#F72585', 
-        iconType: 'material-community'
-      },
-      { 
-        name: 'Perdido', 
-        scenario: 'lost', 
-        icon: 'map-marker-question', 
-        color: '#4361EE', 
-        iconType: 'material-community'
-      },
-    ]
-  }
+  earthquake: {
+    title: 'Terremoto',
+    emoji: '🌍',
+    color: '#7209B7',
+    steps: [
+      'Mantén la calma y no corras.',
+      'Agáchate, cúbrete debajo de una mesa resistente y sujétate.',
+      'Aléjate de ventanas, espejos y objetos que puedan caerse.',
+      'Si estás en la calle, aléjate de edificios, árboles y cables eléctricos.',
+      'Si estás en un vehículo, detente en un lugar seguro y permanece dentro.',
+      'Después del temblor, revisa si hay heridos y daños.',
+      'Prepárate para réplicas y mantente alerta.',
+    ],
+  },
+  firstAid: {
+    title: 'Primeros Auxilios',
+    emoji: '🩹',
+    color: '#F72585',
+    steps: [
+      'Verifica que el lugar sea seguro antes de ayudar.',
+      'Llama a un adulto de confianza o al 128 (ambulancia).',
+      'Si hay sangrado, presiona la herida con un trapo limpio.',
+      'No muevas a la persona si sospechas una lesión en la columna.',
+      'Si la persona no respira, pide ayuda inmediata.',
+      'Mantén a la persona cómoda y abrigada hasta que llegue ayuda.',
+      'No le des comida ni agua si está inconsciente.',
+    ],
+  },
+  lost: {
+    title: 'Me Perdí',
+    emoji: '📍',
+    color: '#4361EE',
+    steps: [
+      'Mantén la calma y quédate donde estás.',
+      'Busca a un policía, guardia de seguridad o empleado de tienda.',
+      'Si tienes un teléfono, llama a un familiar o al 110 (policía).',
+      'No te vayas con extraños, aunque te ofrezcan ayuda.',
+      'Si estás en un lugar público, busca un punto de información.',
+      'Recuerda el nombre completo y teléfono de tus papás.',
+      'Espera en un lugar visible y seguro.',
+    ],
+  },
+};
+
+const SCENARIOS = [
+  { key: 'fire', label: 'Incendio', icon: 'fire', iconType: 'material-community' as const, color: '#F77F00' },
+  { key: 'earthquake', label: 'Terremoto', icon: 'home-alert', iconType: 'material-community' as const, color: '#7209B7' },
+  { key: 'firstAid', label: 'Primeros Auxilios', icon: 'medical-bag', iconType: 'material-community' as const, color: '#F72585' },
+  { key: 'lost', label: 'Me Perdí', icon: 'map-marker-question', iconType: 'material-community' as const, color: '#4361EE' },
+];
+
+const SOS_OPTIONS = [
+  { label: 'Policía', phone: '110', icon: 'police-badge', iconType: 'material-community' as const, color: '#3A86FF' },
+  { label: 'Bomberos', phone: '122', icon: 'fire-extinguisher', iconType: 'fa5' as const, color: '#F8333C' },
+  { label: 'Ambulancia', phone: '128', icon: 'ambulance', iconType: 'fa5' as const, color: '#B5179E' },
+  { label: 'Protección Infantil', phone: '1546', icon: 'child', iconType: 'fa5' as const, color: '#4361EE' },
+];
+
+const SAFETY_TIPS = [
+  { icon: 'shield-alt', iconType: 'fa5' as const, color: '#4361EE', text: 'Siempre busca la ayuda de un adulto en situaciones de emergencia.' },
+  { icon: 'hand-paper', iconType: 'fa5' as const, color: '#F72585', text: 'Mantén la calma y respira profundamente si estás asustado.' },
+  { icon: 'id-card', iconType: 'fa5' as const, color: '#2B9EB3', text: 'Memoriza el nombre y teléfono de tus papás o encargados.' },
+  { icon: 'map-marker-alt', iconType: 'fa5' as const, color: '#F77F00', text: 'Aprende la dirección de tu casa para poder pedir ayuda.' },
 ];
 
 export default function HomeScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const [isConnected, setIsConnected] = useState(true);
   const [offlineGuidesReady, setOfflineGuidesReady] = useState(false);
-  
-  // Forzar configuración del StatusBar al enfocar esta pantalla
-  useFocusEffect(
-    useCallback(() => {
-      // Usar la API nativa de StatusBar
-      StatusBar.setBarStyle('light-content');
-      StatusBar.setBackgroundColor('#198EA5');
-      return () => {
-        // Limpieza si es necesario
-      };
-    }, [])
-  );
+  const [showSOS, setShowSOS] = useState(false);
+  const [activeGuide, setActiveGuide] = useState<string | null>(null);
 
-  // Monitor network connectivity
+  useFocusEffect(useCallback(() => {
+    StatusBar.setBarStyle('light-content');
+    StatusBar.setBackgroundColor('#198EA5');
+    return () => { };
+  }, []));
+
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsConnected(state.isConnected !== null ? state.isConnected : false);
-    });
-    
-    // Check initial connection state
-    NetInfo.fetch().then((state) => {
-      setIsConnected(state.isConnected !== null ? state.isConnected : false);
-    });
-    
-    // For demo purposes: simulate network changes every 30 seconds
-    // This is just for testing - remove in production
-    const intervalId = setInterval(() => {
-      // Toggle network state for demonstration
-      NetInfo.simulateNetworkChange(!isConnected);
-    }, 30000);
-    
-    return () => {
-      unsubscribe();
-      clearInterval(intervalId);
-    };
-  }, [isConnected]);
-  
-  // Initialize offline storage for emergency guides
-  useEffect(() => {
-    const prepareOfflineContent = async () => {
-      try {
-        // Check if guides are already stored
-        const guidesStored = await checkGuidesStored();
-        
-        if (!guidesStored) {
-          // Initialize offline storage with emergency guides
-          await initializeOfflineStorage();
-        }
-        
-        setOfflineGuidesReady(true);
-      } catch (error) {
-        console.error('Error preparing offline content:', error);
-      }
-    };
-    
-    prepareOfflineContent();
+    const unsub = NetInfo.addEventListener((s) => setIsConnected(s.isConnected ?? false));
+    NetInfo.fetch().then((s) => setIsConnected(s.isConnected ?? false));
+    return () => unsub();
   }, []);
-  
-  // Handle emergency scenario selection
-  const handleScenarioPress = async (scenarioType: string) => {
-    try {
-      // Map the lowercase scenario types to the uppercase keys expected by getEmergencyGuide
-      const scenarioMap: Record<string, EmergencyGuideType> = {
-        'fire': 'FIRE',
-        'earthquake': 'EARTHQUAKE',
-        'theft': 'THEFT',
-        'lost': 'LOST_PERSON',
-        'firstAid': 'THEFT', // Temporarily map to THEFT until we have a firstAid guide
-      };
-      
-      const mappedType = scenarioMap[scenarioType];
-      if (!mappedType) {
-        console.error(`Unknown scenario type: ${scenarioType}`);
-        return;
-      }
-      
-      const guide = await getEmergencyGuide(mappedType);
-      
-      if (guide) {
-        Alert.alert(
-          guide.title,
-          guide.steps.join('\n\n'),
-          [{ text: 'Entendido', style: 'default' }]
-        );
-      } else {
-        Alert.alert(
-          'Información no disponible',
-          'No se pudo cargar la guía de emergencia. Por favor, intenta más tarde.',
-          [{ text: 'OK', style: 'default' }]
-        );
-      }
-    } catch (error) {
-      console.error('Error loading emergency guide:', error);
-      Alert.alert(
-        'Error',
-        'Ocurrió un error al cargar la información.',
-        [{ text: 'OK', style: 'default' }]
-      );
-    }
-  };
-  
-  // Handle emergency call buttons
-  const handleEmergencyCall = (serviceType: string, phoneNumber: string) => {
-    Alert.alert(
-      `Llamar a ${serviceType}`,
-      `¿Estás seguro que quieres llamar al ${phoneNumber}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Llamar', 
-          style: 'destructive',
-          onPress: () => {
-            // In a real app, this would use Linking to make a phone call
-            Alert.alert('Simulando llamada', `Llamando al ${phoneNumber}...`);
-          }
-        }
-      ]
-    );
-  };
 
-  // Render icon based on type
-  type IconItem = {
-    icon: string;
-    iconType: IconType;
-    color?: string;
-  };
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!(await checkGuidesStored())) await initializeOfflineStorage();
+        setOfflineGuidesReady(true);
+      } catch (e) { console.error(e); }
+    })();
+  }, []);
 
-  const renderIcon = (item: IconItem, size = 32) => {
-    switch (item.iconType) {
-      case 'fa5':
-        return <FontAwesome5 name={item.icon as any} size={size} color="white" />;
-      case 'material':
-        return <MaterialIcons name={item.icon as any} size={size} color="white" />;
-      case 'ionicons':
-        return <Ionicons name={item.icon as any} size={size} color="white" />;
-      case 'material-community':
-        return <MaterialCommunityIcons name={item.icon as any} size={size} color="white" />;
-      default:
-        return <FontAwesome5 name="question" size={size} color="white" />;
-    }
-  };
-
-  // Render category icon
-  const renderCategoryIcon = (category: IconItem) => {
-    switch (category.iconType) {
-      case 'fa5':
-        return <FontAwesome5 name={category.icon as any} size={20} color="#2B9EB3" />;
-      case 'material':
-        return <MaterialIcons name={category.icon as any} size={20} color="#2B9EB3" />;
-      case 'ionicons':
-        return <Ionicons name={category.icon as any} size={20} color="#2B9EB3" />;
-      case 'material-community':
-        return <MaterialCommunityIcons name={category.icon as any} size={20} color="#2B9EB3" />;
-      default:
-        return null;
-    }
-  };
-
-  // Custom components for consistent styling
-  type CustomViewProps = {
-    style?: any;
-    children: React.ReactNode;
-  };
-
-  type CustomTextProps = {
-    style?: any;
-    children: React.ReactNode;
-    type?: 'default' | 'title' | 'subtitle';
-  };
-
-  const CustomView = ({ style, children }: CustomViewProps) => {
-    return (
-      <View style={style}>
-        {children}
-      </View>
-    );
-  };
-
-  const CustomText = ({ style, children, type = 'default' }: CustomTextProps) => {
-    let textStyle = style;
-    if (type === 'title') {
-      textStyle = {...style, fontSize: 28, fontWeight: 'bold'};
-    } else if (type === 'subtitle') {
-      textStyle = {...style, fontSize: 20, fontWeight: '600'};
-    }
-    return (
-      <Text style={textStyle}>
-        {children}
-      </Text>
-    );
-  };
-
-  // Function to adjust color for gradient
-  const adjustColor = (color: string, amount: number) => {
-    const clamp = (val: number) => Math.min(255, Math.max(0, val));
-    
-    // Remove the leading # if it exists
-    const hex = color.replace('#', '');
-    
-    // Parse the hex values
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    
-    // Adjust each color component
-    const rNew = clamp(r + amount);
-    const gNew = clamp(g + amount);
-    const bNew = clamp(b + amount);
-    
-    // Convert back to hex
-    const rHex = rNew.toString(16).padStart(2, '0');
-    const gHex = gNew.toString(16).padStart(2, '0');
-    const bHex = bNew.toString(16).padStart(2, '0');
-    
-    return `#${rHex}${gHex}${bHex}`;
-  };
-  
-  const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: '#F8FAFF', // Use a direct color value instead of Colors.background
-    },
-    header: {
-      width: '100%',
-      height: 200,
-      marginBottom: 10,
-      overflow: 'hidden',
-    },
-    headerBackgroundImage: {
-      width: '100%',
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0,
-    },
-    heroOverlay: {
-      width: '100%',
-      height: '100%',
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingTop: 20,
-      paddingBottom: 30,
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0,
-    },
-    heroContainer: {
-      width: '90%',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerTextContainer: {
-      alignItems: 'center',
-    },
-    headerTitle: {
-      fontSize: 28,
-      color: 'white',
-      marginBottom: 8,
-      textAlign: 'center',
-      fontWeight: 'bold',
-      textShadowColor: 'rgba(0,0,0,0.3)',
-      textShadowOffset: { width: 1, height: 1 },
-      textShadowRadius: 4,
-    },
-    headerSubtitle: {
-      fontSize: 16,
-      color: 'rgba(255,255,255,0.9)',
-      textAlign: 'center',
-    },
-    offlineContainer: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: '#FFEED6',
-      padding: 10,
-      marginHorizontal: 15,
-      marginTop: 10,
-      borderRadius: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.1,
-      shadowRadius: 2,
-      elevation: 2,
-    },
-    offlineText: {
-      fontSize: 16,
-      marginLeft: 10,
-      fontWeight: 'bold',
-      color: '#FF6B6B',
-    },
-    offlineReadyContainer: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: '#FFFFFF',
-      padding: 8,
-      marginHorizontal: 15,
-      marginTop: 5,
-      borderRadius: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.1,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    offlineReadyText: {
-      color: '#4CAF50',
-      fontSize: 12,
-      marginLeft: 5,
-      fontWeight: '500',
-    },
-    emergencyBanner: {
-      flexDirection: 'row',
-      marginHorizontal: 15,
-      marginVertical: 10,
-      backgroundColor: '#FF5757',
-      borderRadius: 15,
-      padding: 15,
-      alignItems: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 3,
-      elevation: 3,
-    },
-    emergencyIconContainer: {
-      backgroundColor: 'rgba(255,255,255,0.2)',
-      borderRadius: 20,
-      width: 40,
-      height: 40,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 10,
-    },
-    emergencyText: {
-      flex: 1,
-      fontSize: 15,
-      color: 'white',
-      fontWeight: '600',
-    },
-    categoryContainer: {
-      marginHorizontal: 15,
-      marginTop: 15,
-      marginBottom: 10,
-      borderRadius: 20,
-      padding: 20,
-      backgroundColor: 'white',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 3 },
-      shadowOpacity: 0.1,
-      shadowRadius: 5,
-      elevation: 4,
-    },
-    categoryTitleContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 20,
-    },
-    categoryIconContainer: {
-      backgroundColor: 'rgba(43, 158, 179, 0.1)',
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 10,
-    },
-    categoryTitle: {
-      fontSize: 20,
-      color: '#2B9EB3',
-      fontWeight: '600',
-    },
-    servicesGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'space-between',
-    },
-    serviceButton: {
-      width: '48%',
-      marginBottom: 15,
-      borderRadius: 16,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.15,
-      shadowRadius: 3,
-      elevation: 3,
-    },
-    serviceGradient: {
-      padding: 15,
-      alignItems: 'center',
-      borderRadius: 16,
-    },
-    iconContainer: {
-      backgroundColor: 'rgba(255,255,255,0.25)',
-      width: 60,
-      height: 60,
-      borderRadius: 30,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    serviceText: {
-      color: 'white',
-      marginTop: 5,
-      marginBottom: 5,
-      fontWeight: '600',
-      textAlign: 'center',
-      fontSize: 15,
-    },
-    phoneContainer: {
-      backgroundColor: 'rgba(255,255,255,0.3)',
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 12,
-      marginTop: 5,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    phoneText: {
-      color: 'white',
-      fontSize: 14,
-      fontWeight: 'bold',
-    },
-    aboutText: {
-      fontSize: 16,
-      lineHeight: 24,
-      color: '#333333',
-      textAlign: 'center',
-    },
-    footer: {
-      margin: 20,
-      padding: 20,
-      backgroundColor: '#FFE8E0',
-      borderRadius: 20,
-      alignItems: 'center',
-      borderWidth: 2,
-      borderColor: '#FFCBB8',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 3,
-      elevation: 3,
-    },
-    footerTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: '#F8333C',
-      marginBottom: 12,
-    },
-    footerBubble: {
-      backgroundColor: 'white',
-      borderRadius: 15,
-      padding: 12,
-      marginVertical: 6,
-      width: '100%',
-      borderWidth: 1,
-      borderColor: '#FFCBB8',
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    footerIcon: {
-      marginRight: 10,
-    },
-    footerText: {
-      flex: 1,
-      color: '#555',
-      fontSize: 14,
-    },
-  });
+  const guide = activeGuide ? GUIDES[activeGuide] : null;
 
   return (
-    <>
-      {/* 
-        Configuración de la barra de estado del dispositivo:
-        - style="light": íconos blancos para mejor contraste
-        - backgroundColor="#198EA5": color institucional de la app
-        - translucent={false}: evita que el contenido se dibuje debajo de la barra
-      */}
+    <CustomView style={{ flex: 1, backgroundColor: '#F8FAFF' }}>
       <ExpoStatusBar style="light" backgroundColor="#198EA5" translucent={false} />
 
-      {/*
-        Contenedor principal desplazable con:
-        - Estilos base del contenedor (styles.container)
-        - Padding inferior dinámico que:
-          * Considera el área segura del dispositivo (insets.bottom)
-          * Añade 20px extra para evitar que el último elemento quede pegado al borde
-      */}
-      <ScrollView 
-        style={[styles.container, {paddingTop: insets.top, paddingBottom: insets.bottom + 20}]} 
-        contentContainerStyle={{paddingBottom: insets.bottom + 20}}
-      >
-        {/* Hero Header with Image Background */}
-        {/* 
-          Header hero con imagen de fondo:
-          - Imagen principal (@/assets/images/hover-principal.jpg)
-          - Estilo del header con padding superior dinámico (insets.top)
-          - resizeMode="cover" asegura que la imagen cubra todo el espacio
-        */}
+      {/* ═══════════ SOS MODAL ═══════════ */}
+      <Modal visible={showSOS} transparent animationType="fade" onRequestClose={() => setShowSOS(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setShowSOS(false)}>
+          <Pressable style={{ backgroundColor: 'white', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: insets.bottom + 20 }}>
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#E2E8F0', marginBottom: 16 }} />
+              <CustomText style={{ fontSize: 20, fontWeight: 'bold', color: '#1E293B' }}>🚨 ¿A quién quieres llamar?</CustomText>
+            </View>
+            {SOS_OPTIONS.map((opt, i) => (
+              <TouchableOpacity
+                key={i}
+                activeOpacity={0.7}
+                onPress={() => { setShowSOS(false); Linking.openURL(`tel:${opt.phone}`).catch(() => { }); }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', backgroundColor: opt.color + '10',
+                  borderRadius: 16, padding: 16, marginBottom: 10, borderLeftWidth: 4, borderLeftColor: opt.color,
+                }}
+              >
+                <View style={{ backgroundColor: opt.color + '20', width: 46, height: 46, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 14 }}>
+                  <IconRenderer icon={opt.icon} type={opt.iconType} size={22} color={opt.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CustomText style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{opt.label}</CustomText>
+                  <CustomText style={{ fontSize: 14, color: '#64748B', marginTop: 2 }}>{opt.phone}</CustomText>
+                </View>
+                <View style={{ backgroundColor: '#22C55E', width: 40, height: 40, borderRadius: 14, justifyContent: 'center', alignItems: 'center' }}>
+                  <IconRenderer icon="call" type="ionicons" size={20} color="white" />
+                </View>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setShowSOS(false)} style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}>
+              <CustomText style={{ fontSize: 15, color: '#94A3B8', fontWeight: '600' }}>Cancelar</CustomText>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ═══════════ GUIDE MODAL ═══════════ */}
+      <Modal visible={!!activeGuide} transparent animationType="slide" onRequestClose={() => setActiveGuide(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} onPress={() => setActiveGuide(null)}>
+          <Pressable style={{ flex: 1, marginTop: 60, backgroundColor: 'white', borderTopLeftRadius: 28, borderTopRightRadius: 28 }}>
+            {guide && (
+              <>
+                {/* Guide Header */}
+                <LinearGradient
+                  colors={[guide.color, guide.color + 'CC']}
+                  style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, alignItems: 'center' }}
+                >
+                  <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', marginBottom: 16 }} />
+                  <CustomText style={{ fontSize: 40, marginBottom: 8 }}>{guide.emoji}</CustomText>
+                  <CustomText style={{ fontSize: 22, fontWeight: 'bold', color: 'white' }}>{guide.title}</CustomText>
+                  <CustomText style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>
+                    {guide.steps.length} pasos para tu seguridad
+                  </CustomText>
+                </LinearGradient>
+
+                {/* Steps */}
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}>
+                  {guide.steps.map((step, i) => (
+                    <View key={i} style={{
+                      flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16,
+                      backgroundColor: '#F8FAFC', borderRadius: 16, padding: 16,
+                    }}>
+                      <View style={{
+                        width: 32, height: 32, borderRadius: 12, backgroundColor: guide.color + '20',
+                        justifyContent: 'center', alignItems: 'center', marginRight: 12, marginTop: 2,
+                      }}>
+                        <CustomText style={{ fontSize: 14, fontWeight: 'bold', color: guide.color }}>{i + 1}</CustomText>
+                      </View>
+                      <CustomText style={{ flex: 1, fontSize: 15, lineHeight: 22, color: '#334155' }}>
+                        {step}
+                      </CustomText>
+                    </View>
+                  ))}
+
+                  <TouchableOpacity
+                    onPress={() => setActiveGuide(null)}
+                    style={{
+                      backgroundColor: guide.color, borderRadius: 16, paddingVertical: 16,
+                      alignItems: 'center', marginTop: 8,
+                    }}
+                  >
+                    <CustomText style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Entendido ✓</CustomText>
+                  </TouchableOpacity>
+                </ScrollView>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ═══════════ MAIN CONTENT ═══════════ */}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
+
+        {/* Hero */}
         <ImageBackground
           source={require('@/assets/images/hover-principal.jpg')}
-          style={[styles.header, styles.headerBackgroundImage, { 
-            paddingTop: insets.top,
-            marginTop: 0 // Aseguramos que no haya margen superior adicional
-          }]}
+          style={{ width: '100%', height: 220, overflow: 'hidden' }}
           resizeMode="cover"
         >
           <LinearGradient
-            colors={['rgba(131, 141, 143, 0.85)', 'rgba(43, 158, 179, 0.9)']}
-            style={styles.heroOverlay}
+            colors={['rgba(25,142,165,0.9)', 'rgba(37,99,235,0.85)']}
+            style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: insets.top + 10, paddingBottom: 20 }}
           >
-            <View style={styles.heroContainer}>
-              <View style={styles.headerTextContainer}>
-                <CustomText type="title" style={styles.headerTitle}>
-                  <FontAwesome5 name="child" size={24} color="white" /> Ayuda Niños GT
-                </CustomText>
-                <CustomText style={styles.headerSubtitle}>
-                  Asistencia rápida para emergencias
-                </CustomText>
-              </View>
-            </View>
+            <IconRenderer icon="child" type="fa5" size={36} color="white" />
+            <CustomText type="title" style={{ color: 'white', fontSize: 26, marginTop: 8, fontWeight: 'bold' }}>
+              Ayuda Niños GT
+            </CustomText>
+            <CustomText style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 4 }}>
+              Saber qué hacer puede salvar vidas
+            </CustomText>
           </LinearGradient>
         </ImageBackground>
-        
-        {/* Offline Mode Indicator */}
-        {!isConnected && (
-          <CustomView style={styles.offlineContainer}>
-            <Ionicons name="cloud-offline" size={20} color="#FF6B6B" />
-            <CustomText style={styles.offlineText}>
-              Modo Sin Internet
+
+        {/* Status Badges */}
+        <View style={{ flexDirection: 'row', paddingHorizontal: 16, marginTop: 12, gap: 8 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: isConnected ? '#F0FDF4' : '#FEF2F2', borderRadius: 12, padding: 10 }}>
+            <IconRenderer icon={isConnected ? 'wifi' : 'cloud-offline'} type="ionicons" size={16} color={isConnected ? '#22C55E' : '#EF4444'} />
+            <CustomText style={{ marginLeft: 6, fontSize: 12, fontWeight: '600', color: isConnected ? '#22C55E' : '#EF4444' }}>
+              {isConnected ? 'Conectado' : 'Sin Internet'}
             </CustomText>
-          </CustomView>
-        )}
-        
-        {/* Offline Guides Ready Indicator */}
-        {offlineGuidesReady && (
-          <CustomView style={styles.offlineReadyContainer}>
-            <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-            <CustomText style={styles.offlineReadyText}>
-              Guías de emergencia disponibles sin internet
-            </CustomText>
-          </CustomView>
-        )}
-        
-        {/* Emergency Banner */}
-        <CustomView style={styles.emergencyBanner}>
-          <View style={styles.emergencyIconContainer}>
-            <FontAwesome5 name="exclamation-triangle" size={24} color="white" />
           </View>
-          <CustomText style={styles.emergencyText}>
-            En caso de emergencia, mantén la calma y busca ayuda de un adulto
-          </CustomText>
-        </CustomView>
-        
-        {/* Emergency Categories */}
-        {EMERGENCY_CATEGORIES.map((category, index) => (
-          <CustomView key={index} style={styles.categoryContainer}>
-            <CustomView style={styles.categoryTitleContainer}>
-              <View style={styles.categoryIconContainer}>
-                {renderCategoryIcon(category)}
-              </View>
-              <CustomText type="subtitle" style={styles.categoryTitle}>
-                {category.title}
-              </CustomText>
-            </CustomView>
-            
-            <CustomView style={styles.servicesGrid}>
-              {category.items.map((item, itemIndex) => (
-                <TouchableOpacity
-                  key={itemIndex}
-                  style={styles.serviceButton}
-                  onPress={() => item.scenario 
-                    ? handleScenarioPress(item.scenario) 
-                    : handleEmergencyCall(item.name, item.phone || '')}
-                  activeOpacity={0.8}
-                >
-                  <LinearGradient 
-                    colors={[item.color, adjustColor(item.color, -20)]} 
-                    style={styles.serviceGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                  >
-                    <View style={styles.iconContainer}>
-                      {renderIcon(item)}
-                    </View>
-                    <CustomText style={styles.serviceText}>{item.name}</CustomText>
-                    {item.phone && (
-                      <View style={styles.phoneContainer}>
-                        <Ionicons name="call" size={12} color="white" style={{marginRight: 5}} />
-                        <CustomText style={styles.phoneText}>{item.phone.toString()}</CustomText>
-                      </View>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              ))}
-            </CustomView>
-          </CustomView>
-        ))}
-        
-        {/* About Section */}
-        <CustomView style={styles.categoryContainer}>
-          <CustomView style={styles.categoryTitleContainer}>
-            <View style={styles.categoryIconContainer}>
-              <FontAwesome5 name="info-circle" size={20} color="#2B9EB3" />
+          {offlineGuidesReady && (
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FDF4', borderRadius: 12, padding: 10 }}>
+              <IconRenderer icon="checkmark-circle" type="ionicons" size={16} color="#22C55E" />
+              <CustomText style={{ marginLeft: 6, fontSize: 12, fontWeight: '600', color: '#22C55E' }}>Guías Offline ✓</CustomText>
             </View>
-            <CustomText type="subtitle" style={styles.categoryTitle}>
-              ¿Qué es Ayuda Niños GT?
-            </CustomText>
-          </CustomView>
-          
-          <CustomText style={styles.aboutText}>
-            Ayuda Niños GT es una aplicación diseñada para ayudar a los niños en Guatemala a buscar ayuda rápidamente en situaciones de emergencia.
+          )}
+        </View>
+
+        {/* SOS Button */}
+        <TouchableOpacity onPress={() => setShowSOS(true)} activeOpacity={0.8} style={{ marginHorizontal: 16, marginTop: 16 }}>
+          <LinearGradient
+            colors={['#EF4444', '#DC2626']}
+            style={{
+              borderRadius: 20, padding: 20, flexDirection: 'row', alignItems: 'center',
+              shadowColor: '#EF4444', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
+            }}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          >
+            <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', marginRight: 14 }}>
+              <CustomText style={{ fontSize: 28 }}>🚨</CustomText>
+            </View>
+            <View style={{ flex: 1 }}>
+              <CustomText style={{ color: 'white', fontSize: 20, fontWeight: 'bold' }}>PEDIR AYUDA</CustomText>
+              <CustomText style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 2 }}>
+                Toca para elegir a quién llamar
+              </CustomText>
+            </View>
+            <IconRenderer icon="chevron-forward" type="ionicons" size={24} color="rgba(255,255,255,0.7)" />
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Scenario Guides */}
+        <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
+          <CustomText style={{ fontSize: 18, fontWeight: 'bold', color: '#1E293B', marginBottom: 14 }}>
+            ¿Qué hacer si…?
           </CustomText>
-          
-          <CustomText style={[styles.aboutText, { marginTop: 10 }]}>
-            Con una interfaz amigable y fácil de usar, los niños pueden contactar a servicios de emergencia o a sus familiares con solo unos toques.
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+            {SCENARIOS.map((s) => (
+              <TouchableOpacity
+                key={s.key}
+                onPress={() => setActiveGuide(s.key)}
+                activeOpacity={0.8}
+                style={{ width: '48%', marginBottom: 12 }}
+              >
+                <View style={{
+                  backgroundColor: 'white', borderRadius: 20, padding: 18, alignItems: 'center',
+                  shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3,
+                  borderLeftWidth: 4, borderLeftColor: s.color,
+                }}>
+                  <View style={{
+                    backgroundColor: s.color + '18', width: 52, height: 52, borderRadius: 18,
+                    justifyContent: 'center', alignItems: 'center', marginBottom: 10,
+                  }}>
+                    <IconRenderer icon={s.icon} type={s.iconType} size={26} color={s.color} />
+                  </View>
+                  <CustomText style={{ fontSize: 14, fontWeight: '700', color: '#1E293B', textAlign: 'center' }}>
+                    {s.label}
+                  </CustomText>
+                  <CustomText style={{ fontSize: 11, color: s.color, marginTop: 4, fontWeight: '600' }}>
+                    Ver {GUIDES[s.key].steps.length} pasos →
+                  </CustomText>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Safety Tips */}
+        <View style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 16 }}>
+          <CustomText style={{ fontSize: 18, fontWeight: 'bold', color: '#1E293B', marginBottom: 14 }}>
+            Consejos de Seguridad
           </CustomText>
-        </CustomView>
-        
-        {/* Footer with Safety Tips */}
-        <CustomView style={styles.footer}>
-          <CustomText style={styles.footerTitle}>Consejos de Seguridad</CustomText>
-          
-          <CustomView style={styles.footerBubble}>
-            <FontAwesome5 name="shield-alt" size={20} color="#4361EE" style={styles.footerIcon} />
-            <CustomText style={styles.footerText}>
-              Siempre busca la ayuda de un adulto en situaciones de emergencia.
-            </CustomText>
-          </CustomView>
-          
-          <CustomView style={styles.footerBubble}>
-            <FontAwesome5 name="hand-paper" size={20} color="#F72585" style={styles.footerIcon} />
-            <CustomText style={styles.footerText}>
-              Mantén la calma y respira profundamente si estás asustado.
-            </CustomText>
-          </CustomView>
-        </CustomView>
+          {SAFETY_TIPS.map((tip, i) => (
+            <View key={i} style={{
+              flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
+              borderRadius: 16, padding: 14, marginBottom: 10,
+              shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 2,
+            }}>
+              <View style={{
+                backgroundColor: tip.color + '15', width: 40, height: 40, borderRadius: 14,
+                justifyContent: 'center', alignItems: 'center', marginRight: 12,
+              }}>
+                <IconRenderer icon={tip.icon} type={tip.iconType} size={18} color={tip.color} />
+              </View>
+              <CustomText style={{ flex: 1, color: '#475569', fontSize: 14, lineHeight: 20 }}>
+                {tip.text}
+              </CustomText>
+            </View>
+          ))}
+        </View>
+
+        {/* About */}
+        <View style={{
+          marginHorizontal: 16, marginBottom: 20, backgroundColor: '#EFF6FF',
+          borderRadius: 20, padding: 20, alignItems: 'center',
+        }}>
+          <IconRenderer icon="heart" type="ionicons" size={24} color="#2563EB" />
+          <CustomText style={{ fontSize: 15, fontWeight: '600', color: '#2563EB', marginTop: 8 }}>
+            Ayuda Niños GT
+          </CustomText>
+          <CustomText style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginTop: 6, lineHeight: 19 }}>
+            Aplicación diseñada para ayudar a los niños en Guatemala a saber qué hacer en una emergencia.
+          </CustomText>
+        </View>
       </ScrollView>
-    </>
+    </CustomView>
   );
 }
